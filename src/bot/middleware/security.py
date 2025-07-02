@@ -38,9 +38,9 @@ async def security_middleware(
         # Continue without validation (log error but don't block)
         return await handler(event, data)
 
-    # Validate text content if present
+    # Validate text content if present (skip for voice messages)
     message = event.effective_message
-    if message and message.text:
+    if message and message.text and not message.voice:
         is_safe, violation_type = await validate_message_content(
             message.text, security_validator, user_id, audit_logger
         )
@@ -73,6 +73,7 @@ async def security_middleware(
         username=username,
         has_text=bool(message and message.text),
         has_document=bool(message and message.document),
+        has_voice=bool(message and message.voice),
     )
 
     # Continue to handler

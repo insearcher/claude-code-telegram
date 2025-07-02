@@ -270,7 +270,7 @@ class SecurityValidator:
         logger.debug("Filename validation successful", filename=filename)
         return True, None
 
-    def sanitize_command_input(self, text: str) -> str:
+    def sanitize_command_input(self, text: Optional[str]) -> str:
         """Sanitize text input for commands.
 
         This removes potentially dangerous characters but preserves
@@ -289,7 +289,7 @@ class SecurityValidator:
             sanitized = sanitized[:max_length]
             logger.warning(
                 "Command input truncated",
-                original_length=len(text),
+                original_length=len(text) if text else 0,
                 truncated_length=len(sanitized),
             )
 

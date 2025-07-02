@@ -34,9 +34,9 @@ def test_production_config():
     assert config_dict["debug"] is False
     assert config_dict["development_mode"] is False
     assert config_dict["log_level"] == "INFO"
-    assert config_dict["enable_telemetry"] is True
-    assert config_dict["claude_max_cost_per_user"] == 5.0
-    assert config_dict["rate_limit_requests"] == 5
+    assert config_dict["enable_telemetry"] is False  # Changed for personal use
+    assert config_dict["claude_max_cost_per_user"] == 999999.0  # Changed for unlimited use
+    assert config_dict["rate_limit_requests"] == 1000  # Changed for generous limits
 
 
 def test_config_as_dict_excludes_internals():

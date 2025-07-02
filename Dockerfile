@@ -7,11 +7,17 @@ ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
-# Install system dependencies
+# Install system dependencies including ffmpeg for audio processing
 RUN apt-get update && apt-get install -y \
     git \
     curl \
+    ffmpeg \
+    nodejs \
+    npm \
     && rm -rf /var/lib/apt/lists/*
+
+# Install Claude CLI
+RUN npm install -g @anthropic/claude-cli
 
 # Install Poetry
 RUN pip install poetry

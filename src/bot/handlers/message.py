@@ -4,7 +4,7 @@ import asyncio
 from typing import Optional
 
 import structlog
-from telegram import Update
+from telegram import Update, Voice
 from telegram.ext import ContextTypes
 
 from ...claude.exceptions import ClaudeToolValidationError
@@ -12,6 +12,7 @@ from ...config.settings import Settings
 from ...security.audit import AuditLogger
 from ...security.rate_limiter import RateLimiter
 from ...security.validators import SecurityValidator
+from ..features.voice_processor import VoiceProcessor
 
 logger = structlog.get_logger()
 
@@ -260,7 +261,7 @@ async def handle_text_message(
         # Send formatted responses (may be multiple messages)
         # Import the new send function
         from ..utils.formatting import send_formatted_message
-        
+
         for i, message in enumerate(formatted_messages):
             try:
                 await send_formatted_message(
@@ -707,6 +708,267 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             "• Screenshot processing\n"
             "• Diagram interpretation"
         )
+
+
+async def handle_voice(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    """Handle voice messages with transcription and Claude processing."""
+    if not update.message or not update.message.voice:
+        return
+
+    user_id = update.effective_user.id if update.effective_user else 0
+    voice: Voice = update.message.voice
+    
+    # Get services from context
+    settings: Settings = context.bot_data["settings"]
+    rate_limiter: Optional[RateLimiter] = context.bot_data.get("rate_limiter")
+    audit_logger: Optional[AuditLogger] = context.bot_data.get("audit_logger")
+    
+    # Note: Security validator not needed for voice processing
+
+    # Log voice message attempt
+    if audit_logger:
+        await audit_logger.log_command(
+            user_id=user_id,
+            command="voice_message",
+            args=[],
+            success=True,
+            execution_time=voice.duration
+        )
+
+    progress_message = None
+    try:
+        # Show initial processing message
+        progress_message = await update.message.reply_text(
+            "🎙️ **Обрабатываю голосовое сообщение...**\n\n"
+            f"📊 Длительность: {voice.duration} сек\n"
+            f"📦 Размер: {voice.file_size or 'неизвестно'} байт"
+        )
+
+        # Check if voice processing is enabled
+        if not settings.voice_enabled:
+            await progress_message.edit_text(
+                "❌ **Обработка голосовых сообщений отключена**\n\n"
+                "Пожалуйста, отправьте ваш запрос текстом."
+            )
+            return
+
+        # Check if OpenAI API key is configured
+        if not settings.openai_api_key:
+            await progress_message.edit_text(
+                "❌ **OpenAI API ключ не настроен**\n\n"
+                "Для обработки голосовых сообщений требуется API ключ OpenAI Whisper.\n"
+                "Пожалуйста, отправьте ваш запрос текстом."
+            )
+            return
+
+        # Initialize voice processor (security validator not needed for voice processing)
+        voice_processor = VoiceProcessor(settings, None)
+
+        # Update progress message
+        await progress_message.edit_text(
+            "🎙️ **Транскрибирую голосовое сообщение...**\n\n"
+            "⏳ Это может занять несколько секунд в зависимости от длительности сообщения."
+        )
+
+        # Process voice message
+        transcript, cost = await voice_processor.process_voice_message(voice, user_id)
+
+        # Check rate limiting with cost
+        if rate_limiter:
+            allowed, limit_message = await rate_limiter.check_rate_limit(user_id, cost)
+            if not allowed:
+                await progress_message.edit_text(
+                    f"⚠️ **Превышен лимит использования**\n\n{limit_message}"
+                )
+                return
+
+        # Delete the progress message
+        try:
+            await progress_message.delete()
+        except Exception:
+            pass
+            
+        # Send transcript as a new permanent message (reply to voice)
+        await update.message.reply_text(
+            "✅ **Голосовое сообщение транскрибировано:**\n\n"
+            f"💬 **Текст:**\n_{transcript}_",
+            parse_mode="Markdown",
+            reply_to_message_id=update.message.message_id  # Reply to the voice message
+        )
+
+        # Log successful transcription
+        logger.info(
+            "Voice message transcribed successfully",
+            user_id=user_id,
+            transcript_length=len(transcript),
+            duration=voice.duration,
+            cost=cost,
+        )
+
+        # Now process with Claude as a separate flow
+        # Show that we're processing the request
+        processing_msg = await update.message.reply_text(
+            "🤖 **Обрабатываю запрос с Claude...**",
+            parse_mode="Markdown"
+        )
+        
+        # Send typing indicator
+        await update.message.chat.send_action("typing")
+
+        # Get Claude integration from context
+        claude_integration = context.bot_data.get("claude_integration")
+        
+        if not claude_integration:
+            try:
+                await processing_msg.delete()
+            except Exception:
+                pass
+            await update.message.reply_text(
+                "❌ **Claude integration not available**\n\n"
+                "The Claude Code integration is not properly configured.",
+                parse_mode="Markdown"
+            )
+            return
+
+        # Get current directory and session
+        current_dir = context.user_data.get(
+            "current_directory", settings.approved_directory
+        )
+        session_id = context.user_data.get("claude_session_id")
+
+        # Process with Claude
+        claude_response = await claude_integration.run_command(
+            prompt=transcript,
+            working_directory=current_dir,
+            user_id=user_id,
+            session_id=session_id,
+        )
+
+        # Update session ID
+        context.user_data["claude_session_id"] = claude_response.session_id
+
+        # Check if Claude changed the working directory
+        _update_working_directory_from_claude_response(
+            claude_response, context, settings, user_id
+        )
+
+        # Format and send response
+        from ..utils.formatting import ResponseFormatter
+
+        formatter = ResponseFormatter(settings)
+        formatted_messages = formatter.format_claude_response(
+            claude_response.content
+        )
+        
+        # Delete the processing message before sending Claude response
+        try:
+            await processing_msg.delete()
+        except Exception:
+            pass
+
+        # Send formatted responses
+        for i, message in enumerate(formatted_messages):
+            await update.message.reply_text(
+                message.text,
+                parse_mode=message.parse_mode,
+                reply_markup=message.reply_markup,
+                reply_to_message_id=(update.message.message_id if i == 0 else None),
+            )
+
+            if i < len(formatted_messages) - 1:
+                await asyncio.sleep(0.5)
+
+    except ValueError as e:
+        # Handle validation errors (file too large, too long, etc.)
+        # Try to delete processing message if it exists
+        if 'processing_msg' in locals():
+            try:
+                await processing_msg.delete()
+            except Exception:
+                pass
+                
+        error_message = (
+            "❌ **Ошибка обработки голосового сообщения**\n\n"
+            f"🚫 {str(e)}\n\n"
+            "💡 **Попробуйте:**\n"
+            "• Записать более короткое сообщение\n"
+            "• Отправить запрос текстом"
+        )
+
+        await update.message.reply_text(error_message, parse_mode="Markdown")
+
+        if audit_logger:
+            await audit_logger.log_security_violation(
+                user_id=user_id,
+                violation_type="voice_validation_error",
+                details=str(e),
+                severity="low",
+                attempted_action="voice_transcription"
+            )
+
+    except RuntimeError as e:
+        # Handle transcription errors
+        # Try to delete processing message if it exists
+        if 'processing_msg' in locals():
+            try:
+                await processing_msg.delete()
+            except Exception:
+                pass
+                
+        error_message = (
+            "❌ **Не удалось обработать голосовое сообщение**\n\n"
+            f"🔧 Техническая ошибка: {str(e)}\n\n"
+            "💡 **Попробуйте:**\n"
+            "• Повторить запрос через несколько минут\n"
+            "• Отправить запрос текстом\n"
+            "• Проверить качество записи"
+        )
+
+        await update.message.reply_text(error_message, parse_mode="Markdown")
+
+        if audit_logger:
+            await audit_logger.log_security_violation(
+                user_id=user_id,
+                violation_type="voice_transcription_error",
+                details=str(e),
+                severity="medium",
+                attempted_action="voice_transcription"
+            )
+
+    except Exception as e:
+        # Handle unexpected errors
+        # Try to delete processing message if it exists
+        if 'processing_msg' in locals():
+            try:
+                await processing_msg.delete()
+            except Exception:
+                pass
+                
+        logger.error(
+            "Unexpected error processing voice message",
+            user_id=user_id,
+            error=str(e),
+            voice_duration=voice.duration,
+        )
+
+        error_message = (
+            "❌ **Произошла неожиданная ошибка**\n\n"
+            "🔧 Не удалось обработать голосовое сообщение.\n"
+            "Пожалуйста, попробуйте отправить запрос текстом."
+        )
+
+        await update.message.reply_text(error_message, parse_mode="Markdown")
+
+        if audit_logger:
+            await audit_logger.log_security_violation(
+                user_id=user_id,
+                violation_type="voice_unexpected_error",
+                details=str(e),
+                severity="high",
+                attempted_action="voice_transcription"
+            )
 
 
 def _estimate_text_processing_cost(text: str) -> float:

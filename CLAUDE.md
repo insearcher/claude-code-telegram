@@ -34,6 +34,12 @@ make status                 # View container status
 make shell                  # Open shell in running container
 ```
 
+**IMPORTANT**: For Docker deployment with Claude Code Max subscription:
+1. **Authenticate Claude CLI locally**: `claude auth login` 
+2. **Leave `ANTHROPIC_API_KEY` empty** - the bot will use your CLI authentication
+3. **Provide `OPENAI_API_KEY`** for voice transcription feature
+4. The Docker container will mount your `~/.config/claude` for authentication
+
 For production deployment, Docker is recommended as it runs the bot in the background and provides automatic restarts on failure.
 
 ### Testing and Code Quality
@@ -134,6 +140,23 @@ The bot uses environment-based configuration with `.env` files. Key configuratio
 - `USE_SDK=true`: Use Python SDK (recommended) vs CLI subprocess
 - `ANTHROPIC_API_KEY`: API key for SDK mode (optional if Claude CLI is authenticated)
 - `CLAUDE_ALLOWED_TOOLS`: Comma-separated list of allowed Claude tools
+
+**Voice Message Support**:
+- `OPENAI_API_KEY`: OpenAI API key for Whisper voice transcription
+- `VOICE_ENABLED=true`: Enable voice message processing
+- `VOICE_MAX_DURATION=1800`: Maximum voice duration in seconds (30 minutes)
+- `VOICE_MAX_FILE_SIZE=104857600`: Maximum voice file size in bytes (100MB)
+- `WHISPER_LANGUAGE=ru`: Language for Whisper transcription (ru, en, auto)
+
+**Personal Claude Code Max Configuration**:
+This bot is configured for personal use with generous limits:
+- `CLAUDE_MAX_COST_PER_USER=999999.0`: Effectively unlimited cost
+- `CLAUDE_MAX_TURNS=100`: Long conversations supported
+- `CLAUDE_TIMEOUT_SECONDS=1200`: 20-minute timeout for complex operations
+- `RATE_LIMIT_REQUESTS=1000`: Very high request limits
+- `SESSION_TIMEOUT_HOURS=48`: 2-day session persistence
+- `MAX_SESSIONS_PER_USER=20`: Multiple parallel projects
+- `MAX_FILE_UPLOAD_SIZE_MB=500`: Large file support
 
 ## Database Schema
 

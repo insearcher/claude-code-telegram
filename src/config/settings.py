@@ -97,6 +97,24 @@ class Settings(BaseSettings):
         description="List of explicitly disallowed Claude tools/commands",
     )
 
+    # Voice processing settings
+    voice_enabled: bool = Field(True, description="Enable voice message processing")
+    voice_max_duration: int = Field(
+        300, description="Maximum voice duration in seconds"
+    )
+    voice_max_file_size: int = Field(
+        20 * 1024 * 1024, description="Maximum voice file size in bytes"
+    )
+
+    # OpenAI settings for voice transcription
+    openai_api_key: Optional[SecretStr] = Field(
+        None, description="OpenAI API key for Whisper transcription"
+    )
+    whisper_language: str = Field(
+        "ru", description="Language for Whisper transcription"
+    )
+    whisper_model: str = Field("whisper-1", description="Whisper model to use")
+
     # Rate limiting
     rate_limit_requests: int = Field(
         DEFAULT_RATE_LIMIT_REQUESTS, description="Requests per window"

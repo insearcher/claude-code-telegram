@@ -21,8 +21,8 @@ services:
       # Mount your projects directory (adjust path as needed)
       - /Users/frolov/projects/tutu:/app/projects:ro
       
-      # Optional: Mount Claude CLI config if using CLI mode
-      # - ~/.config/claude:/home/appuser/.config/claude:ro
+      # Mount Claude CLI config for Claude Code Max authentication
+      - ~/.config/claude:/home/appuser/.config/claude:ro
     
     # Network mode for accessing local services if needed
     # network_mode: host

@@ -50,16 +50,19 @@ class TestingConfig:
 
 
 class ProductionConfig:
-    """Production environment configuration."""
+    """Production environment configuration - Personal use with Claude Code Max."""
 
     debug: bool = False
     development_mode: bool = False
     log_level: str = "INFO"
-    enable_telemetry: bool = True
-    # Use stricter defaults for production
-    claude_max_cost_per_user: float = 5.0  # Lower cost limit
-    rate_limit_requests: int = 5  # Stricter rate limiting
-    session_timeout_hours: int = 12  # Shorter session timeout
+    enable_telemetry: bool = False  # Disable telemetry for personal use
+    # No limits for personal Claude Code Max usage
+    claude_max_cost_per_user: float = 999999.0  # Effectively unlimited
+    rate_limit_requests: int = 1000  # Very high limit
+    rate_limit_window: int = 60
+    rate_limit_burst: int = 2000  # High burst capacity
+    session_timeout_hours: int = 24  # Longer sessions
+    claude_timeout_seconds: int = 1200  # 20 minutes for complex operations
 
     @classmethod
     def as_dict(cls) -> Dict[str, Any]:

@@ -4,17 +4,17 @@
 APP_NAME = "Claude Code Telegram Bot"
 APP_DESCRIPTION = "Telegram bot for remote Claude Code access"
 
-# Default limits
-DEFAULT_CLAUDE_TIMEOUT_SECONDS = 300
-DEFAULT_CLAUDE_MAX_TURNS = 10
-DEFAULT_CLAUDE_MAX_COST_PER_USER = 10.0
+# Default limits - Generous for personal Claude Code Max usage
+DEFAULT_CLAUDE_TIMEOUT_SECONDS = 1200  # 20 minutes for complex operations
+DEFAULT_CLAUDE_MAX_TURNS = 100  # Long conversations
+DEFAULT_CLAUDE_MAX_COST_PER_USER = 999999.0  # Effectively unlimited
 
-DEFAULT_RATE_LIMIT_REQUESTS = 10
+DEFAULT_RATE_LIMIT_REQUESTS = 1000  # Very high limit
 DEFAULT_RATE_LIMIT_WINDOW = 60
-DEFAULT_RATE_LIMIT_BURST = 20
+DEFAULT_RATE_LIMIT_BURST = 2000  # High burst capacity
 
-DEFAULT_SESSION_TIMEOUT_HOURS = 24
-DEFAULT_MAX_SESSIONS_PER_USER = 5
+DEFAULT_SESSION_TIMEOUT_HOURS = 48  # 2 days for long projects
+DEFAULT_MAX_SESSIONS_PER_USER = 20  # Multiple parallel projects
 
 # Message limits
 TELEGRAM_MAX_MESSAGE_LENGTH = 4096

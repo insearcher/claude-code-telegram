@@ -3,6 +3,7 @@
 from typing import Any, Callable, Dict
 
 import structlog
+from telegram.ext import ApplicationHandlerStop
 
 logger = structlog.get_logger()
 
@@ -67,7 +68,8 @@ async def rate_limit_middleware(
         # Send user-friendly rate limit message
         if event.effective_message:
             await event.effective_message.reply_text(f"⏱️ {message}")
-        return  # Stop processing
+        # Stop all further handler processing
+        raise ApplicationHandlerStop()
 
     # Rate limit check passed
     logger.debug(
@@ -91,7 +93,7 @@ def estimate_message_cost(event: Any) -> float:
     - Expected Claude usage
     """
     message = event.effective_message
-    message_text = message.text if message else ""
+    message_text = message.text if message and message.text else ""
 
     # Base cost for any message
     base_cost = 0.01
@@ -103,6 +105,12 @@ def estimate_message_cost(event: Any) -> float:
     if (message and message.document) or (message and message.photo):
         # File uploads cost more
         return base_cost + length_cost + 0.05
+    
+    if message and message.voice:
+        # Voice messages cost more (transcription cost)
+        # Estimate based on duration if available
+        duration = message.voice.duration if message.voice.duration else 60
+        return base_cost + (duration * 0.001)  # ~$0.06 for 60 seconds
 
     if message_text.startswith("/"):
         # Commands cost more

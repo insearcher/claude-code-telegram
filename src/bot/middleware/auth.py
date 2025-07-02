@@ -4,6 +4,7 @@ from datetime import datetime
 from typing import Any, Callable, Dict
 
 import structlog
+from telegram.ext import ApplicationHandlerStop
 
 logger = structlog.get_logger()
 
@@ -39,7 +40,7 @@ async def auth_middleware(handler: Callable, event: Any, data: Dict[str, Any]) -
             await event.effective_message.reply_text(
                 "🔒 Authentication system unavailable. Please try again later."
             )
-        return
+        raise ApplicationHandlerStop()
 
     # Check if user is already authenticated
     if auth_manager.is_authenticated(user_id):
@@ -104,7 +105,8 @@ async def auth_middleware(handler: Callable, event: Any, data: Dict[str, Any]) -
                 f"Your Telegram ID: `{user_id}`\n"
                 "Share this ID with the administrator to request access."
             )
-        return  # Stop processing
+        # Stop all further handler processing
+        raise ApplicationHandlerStop()
 
 
 async def require_auth(handler: Callable, event: Any, data: Dict[str, Any]) -> Any:

@@ -144,6 +144,11 @@ class ClaudeCodeBot:
             group=10,
         )
 
+        self.app.add_handler(
+            MessageHandler(filters.VOICE, self._inject_deps(message.handle_voice)),
+            group=10,
+        )
+
         # Callback query handler
         self.app.add_handler(
             CallbackQueryHandler(self._inject_deps(callback.handle_callback_query))
