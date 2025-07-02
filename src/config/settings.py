@@ -158,6 +158,16 @@ class Settings(BaseSettings):
         """Parse comma-separated user IDs."""
         if isinstance(v, str):
             return [int(uid.strip()) for uid in v.split(",") if uid.strip()]
+        elif isinstance(v, int):
+            return [v]  # Single user ID as integer
+        return v  # type: ignore[no-any-return]
+
+    @field_validator("claude_allowed_tools", mode="before")
+    @classmethod
+    def parse_claude_allowed_tools(cls, v: Any) -> Optional[List[str]]:
+        """Parse comma-separated Claude tools."""
+        if isinstance(v, str):
+            return [tool.strip() for tool in v.split(",") if tool.strip()]
         return v  # type: ignore[no-any-return]
 
     @field_validator("approved_directory")

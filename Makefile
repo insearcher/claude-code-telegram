@@ -1,18 +1,28 @@
-.PHONY: install dev test lint format clean help run
+.PHONY: install dev test lint format clean help run build up down logs shell restart status
 
 # Default target
 help:
 	@echo "Available commands:"
-	@echo "  install    - Install production dependencies"
-	@echo "  dev        - Install development dependencies"
-	@echo "  test       - Run tests"
-	@echo "  lint       - Run linting checks"
-	@echo "  format     - Format code"
-	@echo "  clean      - Clean up generated files"
-	@echo "  run        - Run the bot"
+	@echo "  install         - Install production dependencies"
+	@echo "  dev             - Install development dependencies"
+	@echo "  test            - Run tests"
+	@echo "  lint            - Run linting checks"
+	@echo "  format          - Format code"
+	@echo "  clean           - Clean up generated files"
+	@echo "  run             - Run the bot (blocking)"
+	@echo "  run-debug       - Run the bot with debug logging (blocking)"
+	@echo ""
+	@echo "Docker commands:"
+	@echo "  build           - Build Docker image"
+	@echo "  up              - Start bot in background with Docker Compose"
+	@echo "  down            - Stop and remove Docker containers"
+	@echo "  logs            - View bot logs"
+	@echo "  shell           - Open shell in running container"
+	@echo "  restart         - Restart bot (useful for config changes)"
+	@echo "  status          - View container status"
 
 install:
-	poetry install --no-dev
+	poetry install --only=main
 
 dev:
 	poetry install
@@ -43,3 +53,30 @@ run:
 # For debugging
 run-debug:
 	poetry run claude-telegram-bot --debug
+
+# Docker commands
+build:
+	docker build -t claude-telegram-bot .
+
+up:
+	@echo "Starting Claude Telegram Bot in background..."
+	@mkdir -p data
+	docker compose up -d
+	@echo "Bot started! Use 'make logs' to view logs."
+
+down:
+	docker compose down
+
+logs:
+	docker compose logs -f claude-telegram-bot
+
+shell:
+	docker compose exec claude-telegram-bot /bin/bash
+
+# Restart bot (useful for config changes)
+restart:
+	docker compose restart claude-telegram-bot
+
+# View status
+status:
+	docker compose ps

@@ -258,12 +258,14 @@ async def handle_text_message(
         await progress_msg.delete()
 
         # Send formatted responses (may be multiple messages)
+        # Import the new send function
+        from ..utils.formatting import send_formatted_message
+        
         for i, message in enumerate(formatted_messages):
             try:
-                await update.message.reply_text(
-                    message.text,
-                    parse_mode=message.parse_mode,
-                    reply_markup=message.reply_markup,
+                await send_formatted_message(
+                    update.message,
+                    message,
                     reply_to_message_id=update.message.message_id if i == 0 else None,
                 )
 
