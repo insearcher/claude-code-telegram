@@ -838,12 +838,22 @@ async def handle_voice(
         )
         session_id = context.user_data.get("claude_session_id")
 
+        # Enhanced stream updates handler with progress tracking
+        async def stream_handler(update_obj):
+            try:
+                progress_text = await _format_progress_update(update_obj)
+                if progress_text:
+                    await processing_msg.edit_text(progress_text, parse_mode="Markdown")
+            except Exception as e:
+                logger.warning("Failed to update progress message", error=str(e))
+
         # Process with Claude
         claude_response = await claude_integration.run_command(
             prompt=transcript,
             working_directory=current_dir,
             user_id=user_id,
             session_id=session_id,
+            on_stream=stream_handler,
         )
 
         # Update session ID
