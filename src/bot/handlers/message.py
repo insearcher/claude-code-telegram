@@ -21,19 +21,40 @@ async def _format_progress_update(update_obj) -> Optional[str]:
     """Format progress updates with enhanced context and visual indicators."""
     if update_obj.type == "tool_result":
         # Show tool completion status
-        tool_name = "Unknown"
-        if update_obj.metadata and update_obj.metadata.get("tool_use_id"):
-            # Try to extract tool name from context if available
+        tool_name = "Tool"
+        tool_context = ""
+        
+        # Try to get tool name and context from metadata
+        if update_obj.metadata:
             tool_name = update_obj.metadata.get("tool_name", "Tool")
+            
+            # For tools with file paths or commands, show context
+            if tool_name == "Bash" and update_obj.content:
+                # Show first line of output or error
+                lines = update_obj.content.strip().split('\n')
+                if lines and lines[0]:
+                    first_line = lines[0]
+                    if len(first_line) > 60:
+                        first_line = first_line[:57] + "..."
+                    tool_context = f"\n  → `{first_line}`"
+            elif tool_name in ["Read", "Write", "Edit"] and update_obj.metadata.get("file_path"):
+                file_path = update_obj.metadata.get("file_path", "")
+                if len(file_path) > 50:
+                    file_path = "..." + file_path[-47:]
+                tool_context = f"\n  → `{file_path}`"
 
         if update_obj.is_error():
-            return f"❌ **{tool_name} failed**\n\n_{update_obj.get_error_message()}_"
+            error_msg = update_obj.get_error_message()
+            # Truncate long error messages
+            if error_msg and len(error_msg) > 100:
+                error_msg = error_msg[:97] + "..."
+            return f"❌ **{tool_name} failed**{tool_context}\n\n_{error_msg}_"
         else:
             execution_time = ""
             if update_obj.metadata and update_obj.metadata.get("execution_time_ms"):
                 time_ms = update_obj.metadata["execution_time_ms"]
                 execution_time = f" ({time_ms}ms)"
-            return f"✅ **{tool_name} completed**{execution_time}"
+            return f"✅ **{tool_name} completed**{execution_time}{tool_context}"
 
     elif update_obj.type == "progress":
         # Handle progress updates
@@ -59,11 +80,79 @@ async def _format_progress_update(update_obj) -> Optional[str]:
         return f"❌ **Error**\n\n_{update_obj.get_error_message()}_"
 
     elif update_obj.type == "assistant" and update_obj.tool_calls:
-        # Show when tools are being called
-        tool_names = update_obj.get_tool_names()
-        if tool_names:
-            tools_text = ", ".join(tool_names)
-            return f"🔧 **Using tools:** {tools_text}"
+        # Show when tools are being called with context
+        tool_info = []
+        for tool_call in update_obj.tool_calls:
+            tool_name = tool_call.get("name", "Unknown")
+            tool_input = tool_call.get("input", {})
+            
+            # Format tool info based on tool type
+            if tool_name == "Bash":
+                command = tool_input.get("command", "")
+                # Truncate long commands
+                if len(command) > 80:
+                    command = command[:77] + "..."
+                tool_info.append(f"**{tool_name}**: `{command}`")
+            elif tool_name == "Read":
+                file_path = tool_input.get("file_path", "")
+                # Show just filename for long paths
+                if len(file_path) > 50:
+                    file_path = "..." + file_path[-47:]
+                tool_info.append(f"**{tool_name}**: `{file_path}`")
+            elif tool_name == "Write" or tool_name == "Edit":
+                file_path = tool_input.get("file_path", "")
+                if len(file_path) > 50:
+                    file_path = "..." + file_path[-47:]
+                tool_info.append(f"**{tool_name}**: `{file_path}`")
+            elif tool_name == "Grep":
+                pattern = tool_input.get("pattern", "")
+                path = tool_input.get("path", ".")
+                if len(pattern) > 30:
+                    pattern = pattern[:27] + "..."
+                tool_info.append(f"**{tool_name}**: `{pattern}` in {path}")
+            elif tool_name == "Task":
+                description = tool_input.get("description", "")
+                if len(description) > 50:
+                    description = description[:47] + "..."
+                tool_info.append(f"**{tool_name}**: {description}")
+            elif tool_name == "LS":
+                path = tool_input.get("path", "")
+                if len(path) > 50:
+                    path = "..." + path[-47:]
+                tool_info.append(f"**{tool_name}**: `{path}`")
+            elif tool_name == "Glob":
+                pattern = tool_input.get("pattern", "")
+                path = tool_input.get("path", ".")
+                if len(pattern) > 30:
+                    pattern = pattern[:27] + "..."
+                tool_info.append(f"**{tool_name}**: `{pattern}` in {path}")
+            elif tool_name == "MultiEdit":
+                file_path = tool_input.get("file_path", "")
+                edits = tool_input.get("edits", [])
+                if len(file_path) > 40:
+                    file_path = "..." + file_path[-37:]
+                tool_info.append(f"**{tool_name}**: `{file_path}` ({len(edits)} edits)")
+            elif tool_name == "WebSearch":
+                query = tool_input.get("query", "")
+                if len(query) > 50:
+                    query = query[:47] + "..."
+                tool_info.append(f"**{tool_name}**: {query}")
+            elif tool_name == "WebFetch":
+                url = tool_input.get("url", "")
+                if len(url) > 50:
+                    url = url[:47] + "..."
+                tool_info.append(f"**{tool_name}**: {url}")
+            elif tool_name == "TodoRead":
+                tool_info.append(f"**{tool_name}**: Reading todo list")
+            elif tool_name == "TodoWrite":
+                todos = tool_input.get("todos", [])
+                tool_info.append(f"**{tool_name}**: {len(todos)} items")
+            else:
+                # For other tools, just show the name
+                tool_info.append(f"**{tool_name}**")
+        
+        if tool_info:
+            return f"🔧 **Using tools:**\n" + "\n".join(f"  • {info}" for info in tool_info)
 
     elif update_obj.type == "assistant" and update_obj.content:
         # Regular content updates with preview
@@ -188,9 +277,25 @@ async def handle_text_message(
 
         # Enhanced stream updates handler with progress tracking
         last_progress_text = None
+        recent_tools = {}  # Track tool calls for context
+        
         async def stream_handler(update_obj):
             nonlocal last_progress_text
             try:
+                # Track tool calls for later reference
+                if update_obj.type == "assistant" and update_obj.tool_calls:
+                    for tool_call in update_obj.tool_calls:
+                        tool_id = tool_call.get("id")
+                        tool_name = tool_call.get("name")
+                        if tool_id and tool_name:
+                            recent_tools[tool_id] = tool_name
+                
+                # Add tool name to metadata for tool results
+                if update_obj.type == "tool_result" and update_obj.metadata:
+                    tool_use_id = update_obj.metadata.get("tool_use_id")
+                    if tool_use_id and tool_use_id in recent_tools:
+                        update_obj.metadata["tool_name"] = recent_tools[tool_use_id]
+                
                 progress_text = await _format_progress_update(update_obj)
                 if progress_text and progress_text != last_progress_text:
                     await progress_msg.edit_text(progress_text, parse_mode="Markdown")
@@ -839,9 +944,25 @@ async def handle_voice(
 
         # Enhanced stream updates handler with progress tracking
         last_progress_text = None
+        recent_tools = {}  # Track tool calls for context
+        
         async def stream_handler(update_obj):
             nonlocal last_progress_text
             try:
+                # Track tool calls for later reference
+                if update_obj.type == "assistant" and update_obj.tool_calls:
+                    for tool_call in update_obj.tool_calls:
+                        tool_id = tool_call.get("id")
+                        tool_name = tool_call.get("name")
+                        if tool_id and tool_name:
+                            recent_tools[tool_id] = tool_name
+                
+                # Add tool name to metadata for tool results
+                if update_obj.type == "tool_result" and update_obj.metadata:
+                    tool_use_id = update_obj.metadata.get("tool_use_id")
+                    if tool_use_id and tool_use_id in recent_tools:
+                        update_obj.metadata["tool_name"] = recent_tools[tool_use_id]
+                
                 progress_text = await _format_progress_update(update_obj)
                 if progress_text and progress_text != last_progress_text:
                     await processing_msg.edit_text(progress_text, parse_mode="Markdown")
