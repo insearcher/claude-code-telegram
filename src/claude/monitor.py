@@ -118,17 +118,23 @@ class ToolMonitor:
                 "rm -rf",
                 "sudo",
                 "chmod 777",
-                "curl",
-                "wget",
+                # Note: curl and wget are often needed for legitimate tasks
+                # "curl",
+                # "wget",
                 "nc ",
                 "netcat",
-                ">",
-                ">>",
-                "|",
-                "&",
-                ";",
+                # Note: These are common shell operators that shouldn't be blocked:
+                # ">" - output redirection
+                # ">>" - append output
+                # "|" - pipe operator
+                # "&" - background process
+                # ";" - command separator
+                # These patterns are too restrictive for a development tool
+                # Only block truly dangerous patterns like command substitution:
                 "$(",
                 "`",
+                "eval ",
+                "exec ",
             ]
 
             for pattern in dangerous_patterns:

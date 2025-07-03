@@ -187,11 +187,14 @@ async def handle_text_message(
         session_id = context.user_data.get("claude_session_id")
 
         # Enhanced stream updates handler with progress tracking
+        last_progress_text = None
         async def stream_handler(update_obj):
+            nonlocal last_progress_text
             try:
                 progress_text = await _format_progress_update(update_obj)
-                if progress_text:
+                if progress_text and progress_text != last_progress_text:
                     await progress_msg.edit_text(progress_text, parse_mode="Markdown")
+                    last_progress_text = progress_text
             except Exception as e:
                 logger.warning("Failed to update progress message", error=str(e))
 
@@ -296,18 +299,14 @@ async def handle_text_message(
         if conversation_enhancer and claude_response:
             try:
                 # Update conversation context
-                conversation_context = conversation_enhancer.update_context(
-                    session_id=claude_response.session_id,
+                conversation_enhancer.update_context(
                     user_id=user_id,
-                    working_directory=str(current_dir),
-                    tools_used=claude_response.tools_used or [],
-                    response_content=claude_response.content,
+                    response=claude_response
                 )
+                conversation_context = conversation_enhancer.get_or_create_context(user_id)
 
                 # Check if we should show follow-up suggestions
-                if conversation_enhancer.should_show_suggestions(
-                    claude_response.tools_used or [], claude_response.content
-                ):
+                if conversation_enhancer.should_show_suggestions(claude_response):
                     # Generate follow-up suggestions
                     suggestions = conversation_enhancer.generate_follow_up_suggestions(
                         claude_response.content,
@@ -839,11 +838,14 @@ async def handle_voice(
         session_id = context.user_data.get("claude_session_id")
 
         # Enhanced stream updates handler with progress tracking
+        last_progress_text = None
         async def stream_handler(update_obj):
+            nonlocal last_progress_text
             try:
                 progress_text = await _format_progress_update(update_obj)
-                if progress_text:
+                if progress_text and progress_text != last_progress_text:
                     await processing_msg.edit_text(progress_text, parse_mode="Markdown")
+                    last_progress_text = progress_text
             except Exception as e:
                 logger.warning("Failed to update progress message", error=str(e))
 
