@@ -75,6 +75,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "**Session Commands:**\n"
         "• `/new` - Start new Claude session\n"
         "• `/continue [message]` - Continue last session (optionally with message)\n"
+        "• `/stop` - Stop current execution (like ESC key)\n"
         "• `/end` - End current session\n"
         "• `/status` - Show session and usage status\n"
         "• `/export` - Export session history\n"
@@ -209,8 +210,14 @@ async def continue_session(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             # Update session ID in context
             context.user_data["claude_session_id"] = claude_response.session_id
 
-            # Delete status message and send response
-            await status_msg.delete()
+            # Update status message to show completion
+            try:
+                await status_msg.edit_text(
+                    "✅ **Session continued successfully**",
+                    parse_mode="Markdown"
+                )
+            except Exception:
+                pass
 
             # Format and send Claude's response
             from ..utils.formatting import ResponseFormatter
@@ -263,10 +270,13 @@ async def continue_session(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         error_msg = str(e)
         logger.error("Error in continue command", error=error_msg, user_id=user_id)
 
-        # Delete status message if it exists
+        # Update status message if it exists
         try:
             if "status_msg" in locals():
-                await status_msg.delete()
+                await status_msg.edit_text(
+                    "❌ **Error occurred**",
+                    parse_mode="Markdown"
+                )
         except Exception:
             pass
 
@@ -703,6 +713,89 @@ async def export_session(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         parse_mode="Markdown",
         reply_markup=reply_markup,
     )
+
+
+async def stop_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /stop command to interrupt current Claude execution (like ESC key)."""
+    user_id = update.effective_user.id
+
+    # Get Claude integration from context
+    claude_integration = context.bot_data.get("claude_integration")
+
+    if not claude_integration:
+        await update.message.reply_text(
+            "❌ **Claude integration not available**", parse_mode="Markdown"
+        )
+        return
+
+    # Check if we're using subprocess mode
+    if (
+        hasattr(claude_integration, "process_manager")
+        and claude_integration.process_manager
+    ):
+        process_manager = claude_integration.process_manager
+
+        # Get active processes
+        active_processes = getattr(process_manager, "active_processes", {})
+
+        if active_processes:
+            # Send interrupt signal (SIGINT) to processes, like Ctrl+C/ESC
+            interrupted_count = 0
+            for process_id, process in list(active_processes.items()):
+                try:
+                    # Send SIGINT instead of kill to allow graceful interruption
+                    import signal
+
+                    process.send_signal(signal.SIGINT)
+                    interrupted_count += 1
+                    logger.info(f"Sent interrupt signal to process {process_id}")
+                except Exception as e:
+                    logger.error(f"Failed to interrupt process {process_id}: {e}")
+
+            if interrupted_count > 0:
+                # Get current session info
+                session_id = context.user_data.get("claude_session_id")
+                await update.message.reply_text(
+                    f"⏸️ **Interrupted Claude execution**\n\n"
+                    f"The current command has been stopped.\n"
+                    f"Session `{session_id[:8] if session_id else 'unknown'}...` remains active.\n\n"
+                    f"You can:\n"
+                    f"• Send a new message to continue in the same session\n"
+                    f"• Use `/end` to terminate the session completely\n"
+                    f"• Use `/new` to start a fresh session",
+                    parse_mode="Markdown",
+                )
+            else:
+                await update.message.reply_text(
+                    "⚠️ **Failed to interrupt Claude**\n\n"
+                    "Could not send interrupt signal to the process.",
+                    parse_mode="Markdown",
+                )
+        else:
+            await update.message.reply_text(
+                "ℹ️ **No active Claude execution**\n\n"
+                "There's no running Claude command to interrupt.\n\n"
+                "This command works like pressing ESC - it stops the current execution but keeps the session alive.",
+                parse_mode="Markdown",
+            )
+    else:
+        # SDK mode doesn't support interruption
+        await update.message.reply_text(
+            "ℹ️ **Interruption not available in SDK mode**\n\n"
+            "The /stop command only works when using Claude CLI subprocess mode.\n"
+            "It simulates pressing ESC to interrupt the current command.",
+            parse_mode="Markdown",
+        )
+
+    # Log the command
+    audit_logger = context.bot_data.get("audit_logger")
+    if audit_logger:
+        await audit_logger.log_command(
+            user_id=user_id,
+            command="stop",
+            args=[],
+            success=True,
+        )
 
 
 async def end_session(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

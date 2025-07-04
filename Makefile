@@ -1,4 +1,4 @@
-.PHONY: install dev test lint format clean help run build up down logs shell restart status
+.PHONY: install dev test lint format clean help run run-debug run-clip run-debug-clip run-log build up down logs shell restart status
 
 # Default target
 help:
@@ -9,8 +9,13 @@ help:
 	@echo "  lint            - Run linting checks"
 	@echo "  format          - Format code"
 	@echo "  clean           - Clean up generated files"
+	@echo ""
+	@echo "Run commands:"
 	@echo "  run             - Run the bot (blocking)"
 	@echo "  run-debug       - Run the bot with debug logging (blocking)"
+	@echo "  run-clip        - Run bot and copy logs to clipboard on exit (macOS)"
+	@echo "  run-debug-clip  - Run bot in debug mode and copy logs to clipboard (macOS)"
+	@echo "  run-log         - Run bot and save logs to timestamped file"
 	@echo ""
 	@echo "Docker commands:"
 	@echo "  build           - Build Docker image"
@@ -53,6 +58,29 @@ run:
 # For debugging
 run-debug:
 	poetry run claude-telegram-bot --debug
+
+# Run with logs copied to clipboard (macOS)
+run-clip:
+	@echo "Starting bot with clipboard logging..."
+	@echo "Press Ctrl+C to stop and copy logs to clipboard"
+	@poetry run claude-telegram-bot 2>&1 | tee /tmp/claude-bot.log; \
+	cat /tmp/claude-bot.log | pbcopy && \
+	echo "\n✅ Logs copied to clipboard!"
+
+# Run in debug mode with logs copied to clipboard (macOS)
+run-debug-clip:
+	@echo "Starting bot in debug mode with clipboard logging..."
+	@echo "Press Ctrl+C to stop and copy logs to clipboard"
+	@poetry run claude-telegram-bot --debug 2>&1 | tee /tmp/claude-bot-debug.log; \
+	cat /tmp/claude-bot-debug.log | pbcopy && \
+	echo "\n✅ Debug logs copied to clipboard!"
+
+# Run with logs saved to file
+run-log:
+	@mkdir -p logs
+	@echo "Starting bot with file logging..."
+	@echo "Logs will be saved to logs/bot-$$(date +%Y%m%d-%H%M%S).log"
+	@poetry run claude-telegram-bot 2>&1 | tee "logs/bot-$$(date +%Y%m%d-%H%M%S).log"
 
 # Docker commands
 build:

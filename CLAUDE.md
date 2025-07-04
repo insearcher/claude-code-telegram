@@ -19,9 +19,17 @@ make dev                    # Install development dependencies and setup pre-com
 ```bash
 make run                    # Run the bot in production mode
 make run-debug              # Run the bot with debug logging enabled
+make run-clip               # Run bot and copy logs to clipboard on exit (macOS)
+make run-debug-clip         # Run bot in debug mode and copy logs to clipboard (macOS)
+make run-log                # Run bot and save logs to timestamped file in logs/
 ```
 
-**IMPORTANT**: Both `make run` and `make run-debug` are **blocking operations** that start the bot in polling mode and will not return control to the terminal. The bot runs continuously waiting for Telegram messages. Use Ctrl+C to stop the bot.
+**IMPORTANT**: All run commands are **blocking operations** that start the bot in polling mode and will not return control to the terminal. The bot runs continuously waiting for Telegram messages. Use Ctrl+C to stop the bot.
+
+**Clipboard Commands** (`run-clip`, `run-debug-clip`):
+- macOS only (uses `pbcopy`)
+- Logs are automatically copied to clipboard when you stop the bot with Ctrl+C
+- Useful for quickly sharing logs when reporting issues
 
 **Docker (Background)**:
 ```bash
@@ -169,6 +177,12 @@ The bot uses SQLite with comprehensive schema including:
 - `cost_tracking`: Daily usage and cost limits
 
 Database migrations are handled automatically on startup.
+
+## Known Limitations
+
+**Stop Button**: The Stop button only works when using Claude CLI subprocess mode (`USE_SDK=false`). In SDK mode, the button provides visual feedback but cannot actually interrupt the execution. This is due to the synchronous nature of the SDK integration.
+
+**Concurrent Requests**: The bot processes requests sequentially. While Claude is processing, other commands (including Stop) are queued and processed after completion.
 
 ## Security Considerations
 

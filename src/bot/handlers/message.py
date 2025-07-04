@@ -4,7 +4,7 @@ import asyncio
 from typing import Optional
 
 import structlog
-from telegram import Update, Voice
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update, Voice
 from telegram.ext import ContextTypes
 
 from ...claude.exceptions import ClaudeToolValidationError
@@ -23,21 +23,23 @@ async def _format_progress_update(update_obj) -> Optional[str]:
         # Show tool completion status
         tool_name = "Tool"
         tool_context = ""
-        
+
         # Try to get tool name and context from metadata
         if update_obj.metadata:
             tool_name = update_obj.metadata.get("tool_name", "Tool")
-            
+
             # For tools with file paths or commands, show context
             if tool_name == "Bash" and update_obj.content:
                 # Show first line of output or error
-                lines = update_obj.content.strip().split('\n')
+                lines = update_obj.content.strip().split("\n")
                 if lines and lines[0]:
                     first_line = lines[0]
                     if len(first_line) > 60:
                         first_line = first_line[:57] + "..."
                     tool_context = f"\n  → `{first_line}`"
-            elif tool_name in ["Read", "Write", "Edit"] and update_obj.metadata.get("file_path"):
+            elif tool_name in ["Read", "Write", "Edit"] and update_obj.metadata.get(
+                "file_path"
+            ):
                 file_path = update_obj.metadata.get("file_path", "")
                 if len(file_path) > 50:
                     file_path = "..." + file_path[-47:]
@@ -85,7 +87,7 @@ async def _format_progress_update(update_obj) -> Optional[str]:
         for tool_call in update_obj.tool_calls:
             tool_name = tool_call.get("name", "Unknown")
             tool_input = tool_call.get("input", {})
-            
+
             # Format tool info based on tool type
             if tool_name == "Bash":
                 command = tool_input.get("command", "")
@@ -150,9 +152,11 @@ async def _format_progress_update(update_obj) -> Optional[str]:
             else:
                 # For other tools, just show the name
                 tool_info.append(f"**{tool_name}**")
-        
+
         if tool_info:
-            return f"🔧 **Using tools:**\n" + "\n".join(f"  • {info}" for info in tool_info)
+            return f"🔧 **Using tools:**\n" + "\n".join(
+                f"  • {info}" for info in tool_info
+            )
 
     elif update_obj.type == "assistant" and update_obj.content:
         # Regular content updates with preview
@@ -248,10 +252,15 @@ async def handle_text_message(
         # Send typing indicator
         await update.message.chat.send_action("typing")
 
-        # Create progress message
+        # Create progress message with Stop button
+        stop_keyboard = InlineKeyboardMarkup(
+            [[InlineKeyboardButton("🛑 Stop", callback_data="action:stop_execution")]]
+        )
+
         progress_msg = await update.message.reply_text(
             "🤔 Processing your request...",
             reply_to_message_id=update.message.message_id,
+            reply_markup=stop_keyboard,
         )
 
         # Get Claude integration and storage from context
@@ -278,7 +287,7 @@ async def handle_text_message(
         # Enhanced stream updates handler with progress tracking
         last_progress_text = None
         recent_tools = {}  # Track tool calls for context
-        
+
         async def stream_handler(update_obj):
             nonlocal last_progress_text
             try:
@@ -289,16 +298,19 @@ async def handle_text_message(
                         tool_name = tool_call.get("name")
                         if tool_id and tool_name:
                             recent_tools[tool_id] = tool_name
-                
+
                 # Add tool name to metadata for tool results
                 if update_obj.type == "tool_result" and update_obj.metadata:
                     tool_use_id = update_obj.metadata.get("tool_use_id")
                     if tool_use_id and tool_use_id in recent_tools:
                         update_obj.metadata["tool_name"] = recent_tools[tool_use_id]
-                
+
                 progress_text = await _format_progress_update(update_obj)
                 if progress_text and progress_text != last_progress_text:
-                    await progress_msg.edit_text(progress_text, parse_mode="Markdown")
+                    # Keep the Stop button while processing
+                    await progress_msg.edit_text(
+                        progress_text, parse_mode="Markdown", reply_markup=stop_keyboard
+                    )
                     last_progress_text = progress_text
             except Exception as e:
                 logger.warning("Failed to update progress message", error=str(e))
@@ -363,8 +375,12 @@ async def handle_text_message(
                 FormattedMessage(_format_error_message(str(e)), parse_mode="Markdown")
             ]
 
-        # Delete progress message
-        await progress_msg.delete()
+        # Update progress message to remove Stop button instead of deleting
+        try:
+            await progress_msg.edit_text("✅ Request completed", reply_markup=None)
+        except Exception:
+            # If edit fails (e.g., message already deleted), ignore
+            pass
 
         # Send formatted responses (may be multiple messages)
         # Import the new send function
@@ -405,18 +421,17 @@ async def handle_text_message(
             try:
                 # Update conversation context
                 conversation_enhancer.update_context(
-                    user_id=user_id,
-                    response=claude_response
+                    user_id=user_id, response=claude_response
                 )
-                conversation_context = conversation_enhancer.get_or_create_context(user_id)
+                conversation_context = conversation_enhancer.get_or_create_context(
+                    user_id
+                )
 
                 # Check if we should show follow-up suggestions
                 if conversation_enhancer.should_show_suggestions(claude_response):
                     # Generate follow-up suggestions
                     suggestions = conversation_enhancer.generate_follow_up_suggestions(
-                        claude_response.content,
-                        claude_response.tools_used or [],
-                        conversation_context,
+                        claude_response, conversation_context
                     )
 
                     if suggestions:
@@ -451,7 +466,7 @@ async def handle_text_message(
     except Exception as e:
         # Clean up progress message if it exists
         try:
-            await progress_msg.delete()
+            await progress_msg.edit_text("❌ Error occurred", parse_mode="Markdown")
         except:
             pass
 
@@ -596,8 +611,12 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                 )
                 return
 
-        # Delete progress message
-        await progress_msg.delete()
+        # Update progress message to remove Stop button instead of deleting
+        try:
+            await progress_msg.edit_text("✅ Request completed", reply_markup=None)
+        except Exception:
+            # If edit fails (e.g., message already deleted), ignore
+            pass
 
         # Create a new progress message for Claude processing
         claude_progress_msg = await update.message.reply_text(
@@ -646,8 +665,13 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                 claude_response.content
             )
 
-            # Delete progress message
-            await claude_progress_msg.delete()
+            # Update progress message instead of deleting
+            try:
+                await claude_progress_msg.edit_text(
+                    "✅ Analysis completed", reply_markup=None
+                )
+            except Exception:
+                pass
 
             # Send responses
             for i, message in enumerate(formatted_messages):
@@ -679,7 +703,7 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     except Exception as e:
         try:
-            await progress_msg.delete()
+            await progress_msg.edit_text("❌ Error occurred", parse_mode="Markdown")
         except:
             pass
 
@@ -723,8 +747,11 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                 photo, update.message.caption
             )
 
-            # Delete progress message
-            await progress_msg.delete()
+            # Update progress message instead of deleting
+            try:
+                await progress_msg.edit_text("✅ Image processed", reply_markup=None)
+            except Exception:
+                pass
 
             # Create Claude progress message
             claude_progress_msg = await update.message.reply_text(
@@ -768,8 +795,13 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                     claude_response.content
                 )
 
-                # Delete progress message
-                await claude_progress_msg.delete()
+                # Update progress message instead of deleting
+                try:
+                    await claude_progress_msg.edit_text(
+                        "✅ Analysis completed", reply_markup=None
+                    )
+                except Exception:
+                    pass
 
                 # Send responses
                 for i, message in enumerate(formatted_messages):
@@ -814,21 +846,19 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         )
 
 
-async def handle_voice(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> None:
+async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle voice messages with transcription and Claude processing."""
     if not update.message or not update.message.voice:
         return
 
     user_id = update.effective_user.id if update.effective_user else 0
     voice: Voice = update.message.voice
-    
+
     # Get services from context
     settings: Settings = context.bot_data["settings"]
     rate_limiter: Optional[RateLimiter] = context.bot_data.get("rate_limiter")
     audit_logger: Optional[AuditLogger] = context.bot_data.get("audit_logger")
-    
+
     # Note: Security validator not needed for voice processing
 
     # Log voice message attempt
@@ -838,7 +868,7 @@ async def handle_voice(
             command="voice_message",
             args=[],
             success=True,
-            execution_time=voice.duration
+            execution_time=voice.duration,
         )
 
     progress_message = None
@@ -888,18 +918,21 @@ async def handle_voice(
                 )
                 return
 
-        # Delete the progress message
+        # Update the progress message to show completion
         try:
-            await progress_message.delete()
+            await progress_message.edit_text(
+                "✅ **Обработка завершена**",
+                parse_mode="Markdown"
+            )
         except Exception:
             pass
-            
+
         # Send transcript as a new permanent message (reply to voice)
         await update.message.reply_text(
             "✅ **Голосовое сообщение транскрибировано:**\n\n"
             f"💬 **Текст:**\n_{transcript}_",
             parse_mode="Markdown",
-            reply_to_message_id=update.message.message_id  # Reply to the voice message
+            reply_to_message_id=update.message.message_id,  # Reply to the voice message
         )
 
         # Log successful transcription
@@ -912,27 +945,34 @@ async def handle_voice(
         )
 
         # Now process with Claude as a separate flow
-        # Show that we're processing the request
+        # Show that we're processing the request with Stop button
+        stop_keyboard = InlineKeyboardMarkup(
+            [[InlineKeyboardButton("🛑 Stop", callback_data="action:stop_execution")]]
+        )
+
         processing_msg = await update.message.reply_text(
             "🤖 **Обрабатываю запрос с Claude...**",
-            parse_mode="Markdown"
+            parse_mode="Markdown",
+            reply_markup=stop_keyboard,
         )
-        
+
         # Send typing indicator
         await update.message.chat.send_action("typing")
 
         # Get Claude integration from context
         claude_integration = context.bot_data.get("claude_integration")
-        
+
         if not claude_integration:
             try:
-                await processing_msg.delete()
+                await processing_msg.edit_text(
+                    "✅ Обработка завершена", parse_mode="Markdown"
+                )
             except Exception:
                 pass
             await update.message.reply_text(
                 "❌ **Claude integration not available**\n\n"
                 "The Claude Code integration is not properly configured.",
-                parse_mode="Markdown"
+                parse_mode="Markdown",
             )
             return
 
@@ -945,7 +985,7 @@ async def handle_voice(
         # Enhanced stream updates handler with progress tracking
         last_progress_text = None
         recent_tools = {}  # Track tool calls for context
-        
+
         async def stream_handler(update_obj):
             nonlocal last_progress_text
             try:
@@ -956,16 +996,19 @@ async def handle_voice(
                         tool_name = tool_call.get("name")
                         if tool_id and tool_name:
                             recent_tools[tool_id] = tool_name
-                
+
                 # Add tool name to metadata for tool results
                 if update_obj.type == "tool_result" and update_obj.metadata:
                     tool_use_id = update_obj.metadata.get("tool_use_id")
                     if tool_use_id and tool_use_id in recent_tools:
                         update_obj.metadata["tool_name"] = recent_tools[tool_use_id]
-                
+
                 progress_text = await _format_progress_update(update_obj)
                 if progress_text and progress_text != last_progress_text:
-                    await processing_msg.edit_text(progress_text, parse_mode="Markdown")
+                    # Keep the Stop button while processing
+                    await processing_msg.edit_text(
+                        progress_text, parse_mode="Markdown", reply_markup=stop_keyboard
+                    )
                     last_progress_text = progress_text
             except Exception as e:
                 logger.warning("Failed to update progress message", error=str(e))
@@ -991,13 +1034,13 @@ async def handle_voice(
         from ..utils.formatting import ResponseFormatter
 
         formatter = ResponseFormatter(settings)
-        formatted_messages = formatter.format_claude_response(
-            claude_response.content
-        )
-        
-        # Delete the processing message before sending Claude response
+        formatted_messages = formatter.format_claude_response(claude_response.content)
+
+        # Update the processing message before sending Claude response
         try:
-            await processing_msg.delete()
+            await processing_msg.edit_text(
+                "✅ Обработка завершена", parse_mode="Markdown"
+            )
         except Exception:
             pass
 
@@ -1016,12 +1059,14 @@ async def handle_voice(
     except ValueError as e:
         # Handle validation errors (file too large, too long, etc.)
         # Try to delete processing message if it exists
-        if 'processing_msg' in locals():
+        if "processing_msg" in locals():
             try:
-                await processing_msg.delete()
+                await processing_msg.edit_text(
+                    "✅ Обработка завершена", parse_mode="Markdown"
+                )
             except Exception:
                 pass
-                
+
         error_message = (
             "❌ **Ошибка обработки голосового сообщения**\n\n"
             f"🚫 {str(e)}\n\n"
@@ -1038,18 +1083,20 @@ async def handle_voice(
                 violation_type="voice_validation_error",
                 details=str(e),
                 severity="low",
-                attempted_action="voice_transcription"
+                attempted_action="voice_transcription",
             )
 
     except RuntimeError as e:
         # Handle transcription errors
         # Try to delete processing message if it exists
-        if 'processing_msg' in locals():
+        if "processing_msg" in locals():
             try:
-                await processing_msg.delete()
+                await processing_msg.edit_text(
+                    "✅ Обработка завершена", parse_mode="Markdown"
+                )
             except Exception:
                 pass
-                
+
         error_message = (
             "❌ **Не удалось обработать голосовое сообщение**\n\n"
             f"🔧 Техническая ошибка: {str(e)}\n\n"
@@ -1067,18 +1114,20 @@ async def handle_voice(
                 violation_type="voice_transcription_error",
                 details=str(e),
                 severity="medium",
-                attempted_action="voice_transcription"
+                attempted_action="voice_transcription",
             )
 
     except Exception as e:
         # Handle unexpected errors
         # Try to delete processing message if it exists
-        if 'processing_msg' in locals():
+        if "processing_msg" in locals():
             try:
-                await processing_msg.delete()
+                await processing_msg.edit_text(
+                    "✅ Обработка завершена", parse_mode="Markdown"
+                )
             except Exception:
                 pass
-                
+
         logger.error(
             "Unexpected error processing voice message",
             user_id=user_id,
@@ -1100,7 +1149,7 @@ async def handle_voice(
                 violation_type="voice_unexpected_error",
                 details=str(e),
                 severity="high",
-                attempted_action="voice_transcription"
+                attempted_action="voice_transcription",
             )
 
 

@@ -105,7 +105,7 @@ def estimate_message_cost(event: Any) -> float:
     if (message and message.document) or (message and message.photo):
         # File uploads cost more
         return base_cost + length_cost + 0.05
-    
+
     if message and message.voice:
         # Voice messages cost more (transcription cost)
         # Estimate based on duration if available

@@ -32,7 +32,9 @@ class VoiceProcessor:
         self.config = config
         self.security = security
         # Extract the actual string value from SecretStr if needed
-        api_key = config.openai_api_key.get_secret_value() if config.openai_api_key else None
+        api_key = (
+            config.openai_api_key.get_secret_value() if config.openai_api_key else None
+        )
         if api_key:
             logger.info(f"Initializing OpenAI client with API key: {api_key[:10]}...")
         else:

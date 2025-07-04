@@ -49,8 +49,6 @@ class FormattedMessage:
             return False
 
         # Check for unescaped special characters outside code blocks
-        import re
-
         # Remove code blocks and inline code for checking
         temp_text = re.sub(r"```.*?```", "", text, flags=re.DOTALL)
         temp_text = re.sub(r"`[^`]*`", "", temp_text)
@@ -101,36 +99,34 @@ class ResponseFormatter:
         """Create HTML fallback version of markdown text."""
         html_text = markdown_text
 
-        # Convert markdown to HTML equivalents
-        import re
+        # First, escape HTML special characters
+        html_text = html_text.replace("&", "&amp;")
+        html_text = html_text.replace("<", "&lt;")
+        html_text = html_text.replace(">", "&gt;")
 
+        # Convert markdown to HTML equivalents
         # Convert code blocks
-        html_text = re.sub(r"```(.*?)```", r"<pre>\1</pre>", html_text, flags=re.DOTALL)
+        html_text = re.sub(
+            r"```(.*?)```",
+            lambda m: f"<pre>{m.group(1)}</pre>",
+            html_text,
+            flags=re.DOTALL,
+        )
 
         # Convert inline code
-        html_text = re.sub(r"`([^`]+)`", r"<code>\1</code>", html_text)
+        html_text = re.sub(
+            r"`([^`]+)`", lambda m: f"<code>{m.group(1)}</code>", html_text
+        )
 
         # Convert bold text
-        html_text = re.sub(r"\*\*([^*]+)\*\*", r"<b>\1</b>", html_text)
-        html_text = re.sub(r"__([^_]+)__", r"<b>\1</b>", html_text)
+        html_text = re.sub(
+            r"\*\*([^*]+)\*\*", lambda m: f"<b>{m.group(1)}</b>", html_text
+        )
+        html_text = re.sub(r"__([^_]+)__", lambda m: f"<b>{m.group(1)}</b>", html_text)
 
         # Convert italic text
-        html_text = re.sub(r"\*([^*]+)\*", r"<i>\1</i>", html_text)
-        html_text = re.sub(r"_([^_]+)_", r"<i>\1</i>", html_text)
-
-        # Escape HTML special characters that aren't part of our tags
-        html_text = html_text.replace("&", "&amp;")
-        html_text = html_text.replace("<", "&lt;").replace(">", "&gt;")
-
-        # Restore our HTML tags
-        html_text = html_text.replace("&lt;pre&gt;", "<pre>").replace(
-            "&lt;/pre&gt;", "</pre>"
-        )
-        html_text = html_text.replace("&lt;code&gt;", "<code>").replace(
-            "&lt;/code&gt;", "</code>"
-        )
-        html_text = html_text.replace("&lt;b&gt;", "<b>").replace("&lt;/b&gt;", "</b>")
-        html_text = html_text.replace("&lt;i&gt;", "<i>").replace("&lt;/i&gt;", "</i>")
+        html_text = re.sub(r"\*([^*]+)\*", lambda m: f"<i>{m.group(1)}</i>", html_text)
+        html_text = re.sub(r"_([^_]+)_", lambda m: f"<i>{m.group(1)}</i>", html_text)
 
         return html_text
 

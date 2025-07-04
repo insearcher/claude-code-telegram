@@ -17,7 +17,13 @@ async def handle_callback_query(
 ) -> None:
     """Route callback queries to appropriate handlers."""
     query = update.callback_query
-    await query.answer()  # Acknowledge the callback
+    
+    # Try to acknowledge the callback
+    try:
+        await query.answer()
+    except Exception as e:
+        # Query might be too old, continue processing anyway
+        logger.debug(f"Failed to answer callback query: {e}")
 
     user_id = query.from_user.id
     data = query.data
@@ -184,6 +190,7 @@ async def handle_action_callback(
         "refresh_status": _handle_refresh_status_action,
         "refresh_ls": _handle_refresh_ls_action,
         "export": _handle_export_action,
+        "stop_execution": _handle_stop_execution_action,
     }
 
     handler = actions.get(action_type)
@@ -1153,3 +1160,137 @@ def _format_file_size(size: int) -> str:
             return f"{size:.1f}{unit}" if unit != "B" else f"{size}B"
         size /= 1024
     return f"{size:.1f}TB"
+
+
+async def _handle_stop_execution_action(
+    query, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    """Handle stop execution action from inline button."""
+    user_id = query.from_user.id
+    
+    # First, provide immediate feedback to the user
+    try:
+        await query.answer("⏸️ Attempting to stop execution...", show_alert=True)
+    except Exception:
+        pass
+
+    # Get Claude integration from context
+    claude_integration = context.bot_data.get("claude_integration")
+
+    if not claude_integration:
+        try:
+            await query.edit_message_text(
+                "❌ **Claude integration not available**", parse_mode="Markdown"
+            )
+        except Exception:
+            # Message was already edited/deleted
+            pass
+        return
+
+    # Check if we're using subprocess mode
+    if (
+        hasattr(claude_integration, "process_manager")
+        and claude_integration.process_manager
+    ):
+        process_manager = claude_integration.process_manager
+
+        # Get active processes
+        active_processes = getattr(process_manager, "active_processes", {})
+
+        if active_processes:
+            # Send interrupt signal (SIGINT) to processes
+            interrupted_count = 0
+            for process_id, process in list(active_processes.items()):
+                try:
+                    import signal
+
+                    process.send_signal(signal.SIGINT)
+                    interrupted_count += 1
+                    logger.info(
+                        f"Sent interrupt signal to process {process_id} via button"
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to interrupt process {process_id}: {e}")
+
+            if interrupted_count > 0:
+                # Update the message to show it was stopped
+                session_id = context.user_data.get("claude_session_id")
+                try:
+                    await query.edit_message_text(
+                        f"⏸️ **Execution Stopped**\n\n"
+                        f"Claude's current command has been interrupted.\n"
+                        f"Session `{session_id[:8] if session_id else 'unknown'}...` remains active.\n\n"
+                        f"Send a new message to continue.",
+                        parse_mode="Markdown",
+                    )
+                except Exception:
+                    # Message was already edited/deleted
+                    await query.answer("Execution stopped")
+            else:
+                try:
+                    await query.edit_message_text(
+                        "⚠️ **Failed to stop execution**\n\n"
+                        "Could not interrupt the current process.",
+                        parse_mode="Markdown",
+                    )
+                except Exception:
+                    await query.answer("Failed to stop execution")
+        else:
+            # No active process, check if it's because process hasn't started yet or already finished
+            message_text = query.message.text if query.message else ""
+            
+            # If the message shows processing is in progress, it might be SDK mode or process not yet started
+            if "Processing" in message_text or "🤔" in message_text or "Working" in message_text:
+                # Process might be in SDK mode or just starting
+                await query.answer("⚠️ Stop is only available in CLI mode during active execution", show_alert=True)
+                
+                # Update message to show Stop was attempted
+                try:
+                    await query.edit_message_text(
+                        "⏸️ **Stop Requested**\n\n"
+                        "Stop functionality is only available in CLI subprocess mode.\n"
+                        "The current process will complete normally.",
+                        parse_mode="Markdown",
+                    )
+                except Exception as e:
+                    logger.debug(f"Failed to edit message after stop attempt: {e}")
+                    pass
+            else:
+                # Process already completed
+                await query.answer("⚠️ Процесс уже завершен", show_alert=True)
+                
+                # Check if message needs updating
+                current_text = query.message.text if query.message else ""
+                new_text = "ℹ️ **No active execution**\n\nThe process has already completed."
+                
+                # Only try to update if the text is different
+                if not current_text.startswith("ℹ️ **No active execution**"):
+                    try:
+                        await query.edit_message_text(
+                            new_text,
+                            parse_mode="Markdown",
+                        )
+                    except Exception as e:
+                        # Message edit failed, but user already got notification
+                        logger.debug(f"Failed to edit message after stop: {e}")
+                        pass
+    else:
+        # SDK mode
+        try:
+            await query.edit_message_text(
+                "ℹ️ **Stop not available in SDK mode**\n\n"
+                "Process interruption only works with CLI subprocess mode.",
+                parse_mode="Markdown",
+            )
+        except Exception:
+            await query.answer("Stop not available in SDK mode")
+
+    # Log the action
+    audit_logger = context.bot_data.get("audit_logger")
+    if audit_logger:
+        await audit_logger.log_command(
+            user_id=user_id,
+            command="stop_button",
+            args=[],
+            success=True,
+        )
